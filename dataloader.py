@@ -115,8 +115,13 @@ class ImageLoader:
                 p = Thread(target=self.getitem_yolo, args=())
             else:
                 p = mp.Process(target=self.getitem_yolo, args=())
+        elif self.format == 'mtcnn':
+            if opt.sp:
+                p = Thread(target=self.getitem_mtcnn, args=())
+            else:
+                p = mp.Process(target=self.getitem_mtcnn, args=())
         else:
-            raise NotImplementedError        
+            raise NotImplementedError
         p.daemon = True
         p.start()
         return self
@@ -149,7 +154,7 @@ class ImageLoader:
                 im_name_k = self.imglist[k].rstrip('\n').rstrip('\r')
                 im_name_k = os.path.join(self.img_dir, im_name_k)
                 img_k, orig_img_k, im_dim_list_k = prep_image(im_name_k, inp_dim)
-            
+
                 img.append(img_k)
                 orig_img.append(orig_img_k)
                 im_name.append(im_name_k)
@@ -164,7 +169,35 @@ class ImageLoader:
 
             while self.Q.full():
                 time.sleep(2)
-            
+
+            self.Q.put((img, orig_img, im_name, im_dim_list))
+
+    def getitem_mtcnn(self):
+        """Same as getitem_yolo()"""
+        for i in range(self.num_batches):
+            img = []
+            orig_img = []
+            im_name = []
+            im_dim_list = []
+            for k in range(i*self.batchSize, min((i +  1)*self.batchSize, self.datalen)):
+                inp_dim = int(opt.inp_dim)
+                im_name_k = self.imglist[k].rstrip('\n').rstrip('\r')
+                im_name_k = os.path.join(self.img_dir, im_name_k)
+                img_k, orig_img_k, im_dim_list_k = prep_image(im_name_k, inp_dim)
+
+                img.append(img_k)
+                orig_img.append(orig_img_k)
+                im_name.append(im_name_k)
+                im_dim_list.append(im_dim_list_k)
+
+            with torch.no_grad():
+                # Human Detection
+                img = torch.cat(img)
+                im_dim_list = torch.FloatTensor(im_dim_list).repeat(1,2)
+                im_dim_list_ = im_dim_list
+
+            while self.Q.full():
+                time.sleep(2)
             self.Q.put((img, orig_img, im_name, im_dim_list))
 
     def getitem(self):
@@ -184,7 +217,7 @@ class VideoLoader:
         self.stream = cv2.VideoCapture(path)
         assert self.stream.isOpened(), 'Cannot capture source'
         self.stopped = False
-        
+
 
         self.batchSize = batchSize
         self.datalen = int(self.stream.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -236,7 +269,7 @@ class VideoLoader:
                     return
                 # process and add the frame to the queue
                 img_k, orig_img_k, im_dim_list_k = prep_frame(frame, inp_dim)
-            
+
                 img.append(img_k)
                 orig_img.append(orig_img_k)
                 im_name.append(str(k)+'.jpg')
@@ -251,7 +284,7 @@ class VideoLoader:
 
             while self.Q.full():
                 time.sleep(2)
-            
+
             self.Q.put((img, orig_img, im_name, im_dim_list))
 
     def videoinfo(self):
@@ -276,7 +309,8 @@ class DetectionLoader:
         self.det_model = Darknet("yolo/cfg/yolov3-spp.cfg")
         self.det_model.load_weights('models/yolo/yolov3-spp.weights')
         self.det_model.net_info['height'] = opt.inp_dim
-        self.det_inp_dim = int(self.det_model.net_info['height'])
+        # self.det_inp_dim = int(self.det_model.net_info['height'])
+        self.det_inp_dim = int(opt.inp_dim)
         assert self.det_inp_dim % 32 == 0
         assert self.det_inp_dim > 32
         self.det_model.cuda()
@@ -311,6 +345,8 @@ class DetectionLoader:
 
     def update(self):
         # keep looping the whole dataset
+        from mtcnn.mtcnn import MTCNN
+        detector = MTCNN()
         for i in range(self.num_batches):
             img, orig_img, im_name, im_dim_list = self.dataloder.getitem()
             if img is None:
@@ -318,12 +354,27 @@ class DetectionLoader:
                 return
 
             with torch.no_grad():
-                # Human Detection
-                img = img.cuda()
-                prediction = self.det_model(img, CUDA=True)
-                # NMS process
-                dets = dynamic_write_results(prediction, opt.confidence,
-                                    opt.num_classes, nms=True, nms_conf=opt.nms_thesh)
+                if self.dataloder.format == 'yolo':
+                    # Human Detection
+                    img = img.cuda()
+                    prediction = self.det_model(img, CUDA=True)
+                    # NMS process
+                    dets = dynamic_write_results(prediction, opt.confidence,
+                                        opt.num_classes, nms=True, nms_conf=opt.nms_thesh)
+
+                elif self.dataloder.format == 'mtcnn':
+                    # Face detection
+                    imgs_np = img.float().mul(255.0).cpu().numpy()
+                    imgs_np = np.squeeze(imgs_np, axis=0)
+                    imgs_np = np.transpose(imgs_np, (1, 2, 0))
+                    dets = detector.detect_faces(imgs_np)
+                    fac_det = []
+                    for det in dets:
+                        fac_det.append([0, det["box"][0], det["box"][1],
+                                        det["box"][0] + det["box"][2], det["box"][1] + det["box"][3],
+                                        det["confidence"], 0.99, 0])
+                    dets = torch.tensor(fac_det)
+
                 if isinstance(dets, int) or dets.shape[0] == 0:
                     for k in range(len(orig_img)):
                         if self.Q.full():
@@ -338,7 +389,7 @@ class DetectionLoader:
                 dets[:, [1, 3]] -= (self.det_inp_dim - scaling_factor * im_dim_list[:, 0].view(-1, 1)) / 2
                 dets[:, [2, 4]] -= (self.det_inp_dim - scaling_factor * im_dim_list[:, 1].view(-1, 1)) / 2
 
-                
+
                 dets[:, 1:5] /= scaling_factor
                 for j in range(dets.shape[0]):
                     dets[j, [1, 3]] = torch.clamp(dets[j, [1, 3]], 0.0, im_dim_list[j, 0])
@@ -398,7 +449,7 @@ class DetectionProcessor:
     def update(self):
         # keep looping the whole dataset
         for i in range(self.datalen):
-            
+
             with torch.no_grad():
                 (orig_img, im_name, boxes, scores, inps, pt1, pt2) = self.detectionLoader.read()
                 if orig_img is None:
@@ -609,7 +660,7 @@ class WebcamLoader:
 class DataWriter:
     def __init__(self, save_video=False,
                 savepath='examples/res/1.avi', fourcc=cv2.VideoWriter_fourcc(*'XVID'), fps=25, frameSize=(640,480),
-                queueSize=1024):
+                queueSize=1024, format='yolo'):
         if save_video:
             # initialize the file video stream along with the boolean
             # used to indicate if the thread should be stopped or not
@@ -618,6 +669,7 @@ class DataWriter:
         self.save_video = save_video
         self.stopped = False
         self.final_result = []
+        self.format = format
         # initialize the queue used to store frames read from
         # the video file
         self.Q = Queue(maxsize=queueSize)
@@ -672,7 +724,7 @@ class DataWriter:
                     }
                     self.final_result.append(result)
                     if opt.save_img or opt.save_video or opt.vis:
-                        img = vis_frame(orig_img, result)
+                        img = vis_frame(orig_img, result, format_=self.format)
                         if opt.vis:
                             cv2.imshow("AlphaPose Demo", img)
                             cv2.waitKey(30)
@@ -707,7 +759,7 @@ class DataWriter:
 
 class Mscoco(data.Dataset):
     def __init__(self, train=True, sigma=1,
-                 scale_factor=(0.2, 0.3), rot_factor=40, label_type='Gaussian'):
+                 scale_factor=(0.2, 0.3), rot_factor=40, label_type='Gaussian', format='yolo'):
         self.img_folder = '../data/coco/images'    # root image folders
         self.is_train = train           # training set or test set
         self.inputResH = opt.inputResH
@@ -719,15 +771,25 @@ class Mscoco(data.Dataset):
         self.rot_factor = rot_factor
         self.label_type = label_type
 
-        self.nJoints_coco = 17
+        self.nJoints_coco = opt.nClasses
         self.nJoints_mpii = 16
-        self.nJoints = 33
+        self.nJoints = opt.nClasses
 
-        self.accIdxs = (1, 2, 3, 4, 5, 6, 7, 8,
-                        9, 10, 11, 12, 13, 14, 15, 16, 17)
-        self.flipRef = ((2, 3), (4, 5), (6, 7),
-                        (8, 9), (10, 11), (12, 13),
-                        (14, 15), (16, 17))
+        if format == 'yolo':
+            self.accIdxs = (1, 2, 3, 4, 5, 6, 7, 8,
+                            9, 10, 11, 12, 13, 14, 15, 16, 17)
+
+            self.flipRef = ((2, 3), (4, 5), (6, 7),
+                            (8, 9), (10, 11), (12, 13),
+                            (14, 15), (16, 17))
+        elif format == 'mtcnn':
+            self.accIdxs = tuple(range(1, opt.nClasses + 1))
+
+            self.flipRef = ((1, 33), (2, 32), (3, 31), (4, 30), (5, 29), (6, 28), (7, 27), (8, 26), (9, 25), (10, 24), (11, 23), (12, 22), (13, 21), (14, 20), (15, 19), (16, 18),
+                            (34, 47), (35, 46), (36, 45), (37, 44), (38, 43), (39, 51), (40, 50), (41, 49), (42, 48),
+                            (52, 65), (53, 64), (54, 63), (55, 62), (56, 67), (57, 66), (58, 68), (59, 69), (60, 70), (61, 71),
+                            (76, 77), (78, 79), (80, 81), (82, 86), (83, 85),
+                            (87, 91), (97, 98), (93, 94), (96, 95), (88, 90), (99, 101), (102, 104), (105, 106))
 
     def __getitem__(self, index):
         pass

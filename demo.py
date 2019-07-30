@@ -23,7 +23,7 @@ from pPose_nms import pose_nms, write_json
 args = opt
 args.dataset = 'coco'
 if not args.sp:
-    torch.multiprocessing.set_start_method('forkserver', force=True)
+    torch.multiprocessing.set_start_method('spawn', force=True)
     torch.multiprocessing.set_sharing_strategy('file_system')
 
 if __name__ == "__main__":
@@ -42,16 +42,17 @@ if __name__ == "__main__":
         raise IOError('Error: must contain either --indir/--list')
 
     # Load input images
-    data_loader = ImageLoader(im_names, batchSize=args.detbatch, format='yolo').start()
+    # data_loader = ImageLoader(im_names, batchSize=args.detbatch, format='yolo').start()
+    data_loader = ImageLoader(im_names, batchSize=args.detbatch, format='mtcnn').start()
 
     # Load detection loader
-    print('Loading YOLO model..')
+    print('Loading det model..')
     sys.stdout.flush()
     det_loader = DetectionLoader(data_loader, batchSize=args.detbatch).start()
     det_processor = DetectionProcessor(det_loader).start()
     
     # Load pose model
-    pose_dataset = Mscoco()
+    pose_dataset = Mscoco(format=data_loader.format)
     if args.fast_inference:
         pose_model = InferenNet_fast(4 * 1 + 1, pose_dataset)
     else:
@@ -66,7 +67,7 @@ if __name__ == "__main__":
     }
 
     # Init data writer
-    writer = DataWriter(args.save_video).start()
+    writer = DataWriter(args.save_video, format='mtcnn').start()
 
     data_len = data_loader.length()
     im_names_desc = tqdm(range(data_len))

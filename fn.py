@@ -141,7 +141,7 @@ def vis_frame_fast(frame, im_res, format='coco'):
     return img
 
 
-def vis_frame(frame, im_res, format='coco'):
+def vis_frame(frame, im_res, format='coco', format_='yolo'):
     '''
     frame: frame image
     im_res: im_res of predictions
@@ -157,9 +157,12 @@ def vis_frame(frame, im_res, format='coco'):
             (11, 13), (12, 14), (13, 15), (14, 16)
         ]
 
-        p_color = [(0, 255, 255), (0, 191, 255),(0, 255, 102),(0, 77, 255), (0, 255, 0), #Nose, LEye, REye, LEar, REar
-                    (77,255,255), (77, 255, 204), (77,204,255), (191, 255, 77), (77,191,255), (191, 255, 77), #LShoulder, RShoulder, LElbow, RElbow, LWrist, RWrist
-                    (204,77,255), (77,255,204), (191,77,255), (77,255,191), (127,77,255), (77,255,127), (0, 255, 255)] #LHip, RHip, LKnee, Rknee, LAnkle, RAnkle, Neck
+        if format_=='yolo':
+            p_color = [(0, 255, 255), (0, 191, 255),(0, 255, 102),(0, 77, 255), (0, 255, 0), #Nose, LEye, REye, LEar, REar
+                        (77,255,255), (77, 255, 204), (77,204,255), (191, 255, 77), (77,191,255), (191, 255, 77), #LShoulder, RShoulder, LElbow, RElbow, LWrist, RWrist
+                        (204,77,255), (77,255,204), (191,77,255), (77,255,191), (127,77,255), (77,255,127), (0, 255, 255)] #LHip, RHip, LKnee, Rknee, LAnkle, RAnkle, Neck
+        elif format_=='mtcnn':
+            p_color = [(0, 255, 255)] * 106
         line_color = [(0, 215, 255), (0, 255, 204), (0, 134, 255), (0, 255, 50), 
                     (77,255,222), (77,196,255), (77,135,255), (191,255,77), (77,255,77), 
                     (77,222,255), (255,156,127), 
@@ -183,8 +186,9 @@ def vis_frame(frame, im_res, format='coco'):
         part_line = {}
         kp_preds = human['keypoints']
         kp_scores = human['kp_score']
-        kp_preds = torch.cat((kp_preds, torch.unsqueeze((kp_preds[5,:]+kp_preds[6,:])/2,0)))
-        kp_scores = torch.cat((kp_scores, torch.unsqueeze((kp_scores[5,:]+kp_scores[6,:])/2,0)))
+        if format_ == 'yolo':
+            kp_preds = torch.cat((kp_preds, torch.unsqueeze((kp_preds[5,:]+kp_preds[6,:])/2,0)))
+            kp_scores = torch.cat((kp_scores, torch.unsqueeze((kp_scores[5,:]+kp_scores[6,:])/2,0)))
         # Draw keypoints
         for n in range(kp_scores.shape[0]):
             if kp_scores[n] <= 0.05:
@@ -197,24 +201,26 @@ def vis_frame(frame, im_res, format='coco'):
             transparency = max(0, min(1, kp_scores[n]))
             img = cv2.addWeighted(bg, transparency, img, 1-transparency, 0)
         # Draw limbs
-        for i, (start_p, end_p) in enumerate(l_pair):
-            if start_p in part_line and end_p in part_line:
-                start_xy = part_line[start_p]
-                end_xy = part_line[end_p]
-                bg = img.copy()
+        if format_=='yolo':
+            for i, (start_p, end_p) in enumerate(l_pair):
+                if start_p in part_line and end_p in part_line:
+                    start_xy = part_line[start_p]
+                    end_xy = part_line[end_p]
+                    bg = img.copy()
 
-                X = (start_xy[0], end_xy[0])
-                Y = (start_xy[1], end_xy[1])
-                mX = np.mean(X)
-                mY = np.mean(Y)
-                length = ((Y[0] - Y[1]) ** 2 + (X[0] - X[1]) ** 2) ** 0.5
-                angle = math.degrees(math.atan2(Y[0] - Y[1], X[0] - X[1]))
-                stickwidth = (kp_scores[start_p] + kp_scores[end_p]) + 1
-                polygon = cv2.ellipse2Poly((int(mX),int(mY)), (int(length/2), stickwidth), int(angle), 0, 360, 1)
-                cv2.fillConvexPoly(bg, polygon, line_color[i])
-                #cv2.line(bg, start_xy, end_xy, line_color[i], (2 * (kp_scores[start_p] + kp_scores[end_p])) + 1)
-                transparency = max(0, min(1, 0.5*(kp_scores[start_p] + kp_scores[end_p])))
-                img = cv2.addWeighted(bg, transparency, img, 1-transparency, 0)
+                    X = (start_xy[0], end_xy[0])
+                    Y = (start_xy[1], end_xy[1])
+                    mX = np.mean(X)
+                    mY = np.mean(Y)
+                    length = ((Y[0] - Y[1]) ** 2 + (X[0] - X[1]) ** 2) ** 0.5
+                    angle = math.degrees(math.atan2(Y[0] - Y[1], X[0] - X[1]))
+                    stickwidth = (kp_scores[start_p] + kp_scores[end_p]) + 1
+                    polygon = cv2.ellipse2Poly((int(mX),int(mY)), (int(length/2), stickwidth), int(angle), 0, 360, 1)
+                    cv2.fillConvexPoly(bg, polygon, line_color[i])
+                    #cv2.line(bg, start_xy, end_xy, line_color[i], (2 * (kp_scores[start_p] + kp_scores[end_p])) + 1)
+                    transparency = max(0, min(1, 0.5*(kp_scores[start_p] + kp_scores[end_p])))
+                    img = cv2.addWeighted(bg, transparency, img, 1-transparency, 0)
+
     img = cv2.resize(img,(width,height),interpolation=cv2.INTER_CUBIC)
     return img
 

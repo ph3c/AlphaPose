@@ -88,7 +88,7 @@ def pose_nms(bboxes, bbox_scores, pose_preds, pose_scores):
     #final_result = [item for item in final_result if item is not None]
 
     for j in range(len(pick)):
-        ids = np.arange(17)
+        ids = np.arange(opt.nClasses)
         max_score = torch.max(scores_pick[j, ids, 0])
 
         if max_score < scoreThreds:
@@ -248,7 +248,7 @@ def get_parametric_distance(i, all_preds, keypoint_scores, ref_dist):
     mask = (dist <= 1)
 
     # Define a keypoints distance
-    score_dists = torch.zeros(all_preds.shape[0], 17)
+    score_dists = torch.zeros(all_preds.shape[0], opt.nClasses)
     keypoint_scores.squeeze_()
     if keypoint_scores.dim() == 1:
         keypoint_scores.unsqueeze_(0)

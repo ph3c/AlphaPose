@@ -8,6 +8,7 @@ from SPPE.src.utils.img import flip, shuffleLR
 from SPPE.src.utils.eval import getPrediction
 from SPPE.src.models.FastPose import createModel
 
+from opt import opt
 import visdom
 import time
 import sys
@@ -39,10 +40,10 @@ class InferenNet(nn.Module):
 
     def forward(self, x):
         out = self.pyranet(x)
-        out = out.narrow(1, 0, 17)
+        out = out.narrow(1, 0, opt.nClasses)
 
         flip_out = self.pyranet(flip(x))
-        flip_out = flip_out.narrow(1, 0, 17)
+        flip_out = flip_out.narrow(1, 0, opt.nClasses)
 
         flip_out = flip(shuffleLR(
             flip_out, self.dataset))
