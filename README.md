@@ -5,6 +5,7 @@
 
 
 ## News!
+- Jul 2019: [**Facial** 106 landmarks](https://github.com/MVIG-SJTU/AlphaPose/blob/pytorch/demo.py#L46) of AlphaPose is released! It was trained on facial landmarks dateset of [Datatang <img src='doc/datatang_logo.jpg' height='20' width='20'>](http://www.datatang.com).
 - Apr 2019: [**MXNet** version](https://github.com/MVIG-SJTU/AlphaPose/tree/mxnet) of AlphaPose is released! It runs at **23 fps** on COCO validation set.
 - Feb 2019: [CrowdPose](https://github.com/MVIG-SJTU/AlphaPose/blob/pytorch/doc/CrowdPose.md) is integrated into AlphaPose Now!
 - Dec 2018: [General version](https://github.com/MVIG-SJTU/AlphaPose/tree/pytorch/PoseFlow) of PoseFlow is released! 3X Faster and support pose tracking results visualization!
